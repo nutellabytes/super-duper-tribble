@@ -1,0 +1,1038 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Certification Mark Reader (BIS, FSSAI, CRS)</title>
+
+<script src="https://cdnjs.cloudflare.com/ajax/libs/tesseract.js/5.1.1/tesseract.min.js"></script>
+
+<style>
+  :root {
+    --bg: #000000;          /* black */
+    --text: #f9e4e4;        /* light blush, readable on black */
+    --accent: #f4c2c2;      /* blush pink */
+    --sage: #9caf88;        /* sage green */
+    --good: #9caf88;        /* sage green  = verified */
+    --warn: #f4c2c2;        /* blush pink  = warning */
+    --bad:  #e58f9a;        /* deeper rose = not found */
+    --panel: rgba(244,194,194,0.08);
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0;
+    min-height: 100vh;
+    background: var(--bg);
+    color: var(--text);
+    font-family: Verdana, Geneva, sans-serif;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 16px;
+    gap: 16px;
+  }
+  h1 { font-size: 1.6rem; margin: 0; text-align: center; color: var(--sage); }
+  p.intro { margin: 0; text-align: center; max-width: 36rem; line-height: 1.5; }
+
+  #legend {
+    width: 100%;
+    max-width: 36rem;
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    justify-content: center;
+    font-size: 0.9rem;
+  }
+  #legend span {
+    border: 2px solid var(--sage);
+    border-radius: 999px;
+    padding: 4px 12px;
+  }
+
+  #stage {
+    position: relative;
+    width: 100%;
+    max-width: 36rem;
+    overflow: hidden;
+    border-radius: 12px;
+    background: #000;
+    border: 2px solid var(--sage);
+  }
+  #stage video { width: 100%; display: block; }
+  #overlay {
+    position: absolute; inset: 0;
+    width: 100%; height: 100%;
+    pointer-events: none;
+  }
+
+  #zoomPanel {
+    position: absolute;
+    display: none;
+    align-items: center;
+    justify-content: center;
+    background: #000;
+    border: 4px solid var(--sage);
+    border-radius: 8px;
+    overflow: hidden;
+    box-shadow: 0 0 0 999px rgba(0,0,0,0.7);
+    transition: left .7s ease, top .7s ease, width .7s ease, height .7s ease;
+  }
+  #zoomPanel.on { display: flex; }
+  #zoomCanvas { width: 100%; height: 100%; object-fit: contain; }
+
+  #guide {
+    width: 100%;
+    max-width: 36rem;
+    padding: 12px 16px;
+    border-left: 6px solid var(--sage);
+    background: var(--panel);
+    border-radius: 8px;
+    font-size: 1.2rem;
+    min-height: 3.2rem;
+  }
+
+  #mainBtn {
+    width: 100%;
+    max-width: 36rem;
+    min-height: 110px;
+    font-size: 1.8rem;
+    font-weight: bold;
+    background: var(--sage);
+    color: #000;
+    border: 4px solid var(--accent);
+    border-radius: 16px;
+    cursor: pointer;
+  }
+  #mainBtn:focus-visible, .small:focus-visible { outline: 4px solid var(--accent); outline-offset: 4px; }
+
+  #certBadge {
+    width: 100%;
+    max-width: 36rem;
+    display: none;
+    padding: 10px 16px;
+    border-radius: 12px;
+    background: var(--accent);
+    color: #000;
+    font-size: 1.2rem;
+    font-weight: bold;
+    line-height: 1.4;
+  }
+  #certBadge small { display: block; font-weight: normal; font-size: 0.9rem; }
+
+  #result {
+    width: 100%;
+    max-width: 36rem;
+    padding: 16px;
+    border-radius: 12px;
+    border: 3px solid var(--accent);
+    font-size: 1.5rem;
+    font-weight: bold;
+    min-height: 4.5rem;
+  }
+  #result.good { border-color: var(--good); color: var(--good); }
+  #result.warn { border-color: var(--warn); color: var(--warn); }
+  #result.bad  { border-color: var(--bad);  color: var(--bad); }
+
+  #details {
+    width: 100%;
+    max-width: 36rem;
+    display: none;
+    background: var(--panel);
+    border-radius: 12px;
+    padding: 12px 16px;
+    line-height: 1.7;
+    font-size: 1.15rem;
+  }
+  #details dt { font-weight: bold; color: var(--sage); }
+  #details dd { margin: 0 0 6px 0; }
+
+  .small {
+    background: transparent;
+    color: var(--text);
+    border: 2px solid var(--accent);
+    border-radius: 8px;
+    padding: 10px 14px;
+    font-size: 1rem;
+    cursor: pointer;
+  }
+  details { width: 100%; max-width: 36rem; }
+  summary { cursor: pointer; }
+  pre {
+    white-space: pre-wrap;
+    background: var(--panel);
+    padding: 10px;
+    border-radius: 8px;
+    font-size: 0.9rem;
+  }
+  #stats { font-size: 0.95rem; margin: 0 0 8px; color: var(--sage); }
+</style>
+</head>
+
+<body>
+  <h1>Certification Mark Reader</h1>
+  <p class="intro">Press start, then show the label of the product to the camera. The app finds the certification mark, tells you which one it is, and checks it. After the result is spoken, the app stays silent until you move the product away or press Rescan.</p>
+
+  <div id="legend" aria-label="Marks this app can identify">
+    <span>BIS (CM/L number)</span>
+    <span>FSSAI (14-digit food licence)</span>
+    <span>CRS (R-number)</span>
+  </div>
+
+  <div id="stage">
+    <video id="video" autoplay playsinline muted aria-label="Camera view"></video>
+    <canvas id="overlay"></canvas>
+    <div id="zoomPanel"><canvas id="zoomCanvas"></canvas></div>
+  </div>
+
+  <div id="guide">Press the button to start.</div>
+
+  <button id="mainBtn">START SCANNING</button>
+
+  <div id="certBadge" role="status" aria-live="polite"></div>
+  <div id="result" role="status" aria-live="assertive">Waiting to scan.</div>
+  <dl id="details"></dl>
+
+  <label class="small">
+    Or choose a photo
+    <input type="file" id="fileInput" accept="image/*" hidden>
+  </label>
+
+  <details>
+    <summary>Speed and what the scanner read (for testing only)</summary>
+    <p id="stats">Starting...</p>
+    <pre id="debug">Nothing scanned yet.</pre>
+  </details>
+
+<script>
+/* =========================================================
+   1. SETTINGS
+   ========================================================= */
+const FAST_W         = 640;    // every frame is shrunk to this width before it is analysed
+const VOICE_RATE     = 0.85;   // calm speaking speed
+const QUIET_MS       = 3000;   // quiet time after any guidance sentence finishes
+const LOCK_CONF      = 55;     // OCR confidence (0-100) needed to lock on a number
+const EDGE_T         = 50;     // how sharp a pixel change must be to count as an "edge"
+const CELL           = 16;     // the fast engine checks the picture in 16x16 pixel squares
+const MIN_TEXT_CELLS = 6;      // how many text-like squares make "text shapes"
+const REMOVE_MS      = 1200;   // text gone this long = product moved away
+const MOVE_DIFF      = 30;     // picture change (0-255) that counts as "moved"
+const MOVE_HOLD_MS   = 500;    // ...if it stays changed this long
+const BLUR_LIMIT = 30, DARK_LIMIT = 55, GLARE_LIMIT = 225;
+// digits and the letters used by CM/L, R- and FSSAI "Lic. No." text
+const WHITELIST = "0123456789CMLRFSAINO/-:. ";
+
+// true  = the camera faces the person holding the product (webcam / kiosk style)
+//         so the image is flipped left-right compared with the person's own left and right.
+// false = left and right in the picture match the person's left and right.
+const CAMERA_FACES_USER = true;
+
+/* =========================================================
+   2. CERTIFICATION MARKS (what each one is called and how it is spoken)
+   ========================================================= */
+const CERTS = {
+  BIS:   { name: "BIS",   say: "B I S",       full: "Bureau of Indian Standards (CM/L licence)",
+           kind: "licence",      okTail: "Licence active." },
+  FSSAI: { name: "FSSAI", say: "F S S A I",   full: "Food Safety and Standards Authority of India",
+           kind: "food licence", okTail: "Food licence active." },
+  CRS:   { name: "CRS",   say: "C R S",       full: "BIS Compulsory Registration Scheme (R-number)",
+           kind: "registration", okTail: "Registration active." }
+};
+
+const MSG_SEARCH = "Camera active. Show the label of the product to the camera, about one hand-span away, and slowly turn the product to find the certification mark.";
+const MSG_TEXT   = "Text found. Hold the product steady right there.";
+
+function lockMessages(type) {
+  const c = CERTS[type];
+  return {
+    text:   "Target locked. " + c.name + " mark found. Verifying, do not move the product.",
+    spoken: "Target locked. " + c.say + " mark found. Verifying, do not move the product."
+  };
+}
+
+/* =========================================================
+   3. MOCK DATABASE (demo data, replace with real numbers)
+   Each record says which mark it belongs to (cert).
+   ========================================================= */
+const bisDatabase = [
+  // FSSAI: 14-digit food licence / registration numbers
+  { cert: "FSSAI", number: "12345678901234", product: "Packaged drinking water", company: "Demo Aqua Ltd",           status: "Active"  },
+  { cert: "FSSAI", number: "21522999000123", product: "Biscuits",                company: "Demo Foods Pvt Ltd",      status: "Expired" },
+  // BIS: CM/L licence numbers
+  { cert: "BIS",   number: "1234567",        product: "Electric kettle",         company: "Demo Appliances Pvt Ltd", status: "Active"  },
+  { cert: "BIS",   number: "41234567",       product: "LED bulb",                company: "Demo Lighting Co",        status: "Active"  },
+  { cert: "BIS",   number: "40987654",       product: "Phone charger",           company: "Demo Electronics",        status: "Expired" },
+  // CRS: R-numbers
+  { cert: "CRS",   number: "41005678",       product: "Wireless earbuds",        company: "Demo Audio Pvt Ltd",      status: "Active"  },
+  { cert: "CRS",   number: "40123456",       product: "Laptop adapter",          company: "Demo Power Co",           status: "Expired" }
+];
+
+/* =========================================================
+   4. SHARED THINGS
+   ========================================================= */
+const $ = (id) => document.getElementById(id);
+const video = $("video");
+const overlay = $("overlay");
+const octx = overlay.getContext("2d");
+const zoomPanel = $("zoomPanel");
+const zoomCanvas = $("zoomCanvas");
+const zctx = zoomCanvas.getContext("2d", { willReadFrequently: true });
+const mainBtn = $("mainBtn");
+const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
+const nextFrame = () => new Promise((r) => requestAnimationFrame(r));
+
+// Work-tables that are reused (nothing is created per frame)
+const fastCanvas = document.createElement("canvas");
+const fastCtx = fastCanvas.getContext("2d", { willReadFrequently: true });
+const full = document.createElement("canvas");              // full-size frozen frame
+const fullCtx = full.getContext("2d");
+const ocrCanvas = document.createElement("canvas");         // 640px copy sent to the reader
+const ocrCtx = ocrCanvas.getContext("2d", { willReadFrequently: true });
+
+// The scanner is always in exactly one of these states
+let state = "idle";            // idle | scanning | verifying | frozen
+let runId = 0;                 // changes on Rescan, so old work knows it is out of date
+let ocrRunning = false;
+let cameraFailed = false;
+let ocrInfo = null;            // latest facts from the reader (brightness, sharpness, ...)
+let lockBlockedUntil = 0;
+
+// Guidance bookkeeping
+let textFrames = 0, emptyFrames = 0;
+let textEpisode = false, step1Done = false, step2Spoken = false;
+
+// "Product moved away" bookkeeping (used while frozen)
+let thumbBase = null, goneSince = 0, movedSince = 0, armGone = false;
+
+// Speed counters
+let fastCount = 0, ocrCount = 0;
+
+function setGuide(msg) { $("guide").textContent = msg; }
+
+// Badge that names the mark that was identified
+function setBadge(type) {
+  const b = $("certBadge");
+  if (!type) { b.style.display = "none"; b.textContent = ""; return; }
+  const c = CERTS[type];
+  b.textContent = "Mark identified: " + c.name;
+  const sub = document.createElement("small");
+  sub.textContent = c.full;
+  b.append(sub);
+  b.style.display = "block";
+}
+
+/* =========================================================
+   5. VOICE: slow, calm, and only one thing at a time
+   ========================================================= */
+const canSpeak = "speechSynthesis" in window;
+let voiceToken = 0, voiceBusy = false, quietUntil = 0;
+
+// Speaks a sentence. Always cuts off whatever was being said before.
+function say(msg, quietAfter = true) {
+  return new Promise((resolve) => {
+    if (!canSpeak) return resolve();
+    const my = ++voiceToken;
+    const wasBusy = voiceBusy || window.speechSynthesis.speaking;
+    window.speechSynthesis.cancel();
+    voiceBusy = true;
+    const u = new SpeechSynthesisUtterance(msg);
+    u.rate = VOICE_RATE;
+    const done = () => {
+      if (my === voiceToken && voiceBusy) {
+        voiceBusy = false;
+        if (quietAfter) quietUntil = Date.now() + QUIET_MS;     // the 3-second breathing space starts now
+      }
+      resolve();
+    };
+    u.onend = u.onerror = done;
+    setTimeout(() => {                                          // tiny gap after a cancel, so the browser does not drop the sentence
+      if (my !== voiceToken) return resolve();
+      window.speechSynthesis.speak(u);
+    }, wasBusy ? 60 : 0);
+    setTimeout(done, 10000);                                    // safety: never wait forever
+  });
+}
+function stopSpeech() {
+  voiceToken++;
+  voiceBusy = false;
+  if (canSpeak) window.speechSynthesis.cancel();
+}
+function guideSay(msg) { setGuide(msg); return say(msg, true); }
+
+// A hint may only be spoken when nothing is being said and the 3 quiet seconds are over
+function canHint() {
+  return state === "scanning" && !voiceBusy && Date.now() >= quietUntil;
+}
+
+// Some phones only allow speech after a tap. A silent sentence on the first tap unlocks it.
+function unlockSpeech() {
+  if (!canSpeak) return;
+  const u = new SpeechSynthesisUtterance(" ");
+  u.volume = 0;
+  window.speechSynthesis.speak(u);
+}
+
+// Sharp two-tone chime for "target locked"
+let audioCtx = null;
+function ensureAudio() {
+  try {
+    if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    if (audioCtx.state === "suspended") audioCtx.resume();
+  } catch (e) { audioCtx = null; }
+}
+function chime() {
+  if (!audioCtx) return;
+  const t = audioCtx.currentTime;
+  [[1200, 0], [1800, 0.11]].forEach(([freq, d]) => {
+    const o = audioCtx.createOscillator(), g = audioCtx.createGain();
+    o.type = "sine";
+    o.frequency.value = freq;
+    g.gain.setValueAtTime(0.0001, t + d);
+    g.gain.exponentialRampToValueAtTime(0.6, t + d + 0.01);
+    g.gain.exponentialRampToValueAtTime(0.0001, t + d + 0.10);
+    o.connect(g);
+    g.connect(audioCtx.destination);
+    o.start(t + d);
+    o.stop(t + d + 0.12);
+  });
+}
+
+/* =========================================================
+   6. FINDING THE NUMBERS IN TEXT
+   Three patterns, three marks:
+     BIS   : CM/L-1234567   (CM/L followed by a number)
+     CRS   : R-41005678     (R followed by 8 digits)
+     FSSAI : 14 digits      (the food licence number)
+   ========================================================= */
+const D = "[0-9OILSB]";
+const RE_CML = new RegExp("CM\\s*/?\\s*L\\s*[-–:.]?\\s*(" + D + "(?:" + D + "|[\\s-][0-9]){5,13})", "gi");
+const RE_14  = new RegExp("\\b(" + D + "(?:" + D + "|[\\s-][0-9]){13})\\b", "gi");
+const RE_CRS = new RegExp("\\bR\\s*[-–:.]?\\s*(" + D + "{8})\\b", "gi");
+
+function cleanNumber(raw, minRealDigits) {
+  const compact = raw.replace(/[\s-]/g, "");
+  const real = (compact.match(/\d/g) || []).length;
+  if (real < minRealDigits) return null;
+  return compact.toUpperCase().replace(/O/g, "0").replace(/[IL]/g, "1").replace(/S/g, "5").replace(/B/g, "8");
+}
+
+function findCandidates(str) {
+  const out = [];
+  for (const m of str.matchAll(RE_CML)) {
+    const v = cleanNumber(m[1], 5);
+    if (v) out.push({ type: "BIS", value: v, start: m.index, end: m.index + m[0].length });
+  }
+  for (const m of str.matchAll(RE_CRS)) {
+    const v = cleanNumber(m[1], 5);
+    if (v) out.push({ type: "CRS", value: v, start: m.index, end: m.index + m[0].length });
+  }
+  for (const m of str.matchAll(RE_14)) {
+    const s = m.index, e = s + m[0].length;
+    if (out.some((o) => s < o.end && e > o.start)) continue;
+    const v = cleanNumber(m[1], 10);
+    if (v) out.push({ type: "FSSAI", value: v, start: s, end: e });
+  }
+  return out;
+}
+function findInText(text) {
+  return (text || "").split("\n").flatMap((line) => findCandidates(line));
+}
+
+/* =========================================================
+   7. PICTURE CLEANING AND QUALITY CHECK
+   ========================================================= */
+function enhance(canvas) {
+  const ctx = canvas.getContext("2d", { willReadFrequently: true });
+  const img = ctx.getImageData(0, 0, canvas.width, canvas.height);
+  const px = img.data;
+  const hist = new Uint32Array(256);
+  for (let i = 0; i < px.length; i += 4) {
+    const g = (0.299 * px[i] + 0.587 * px[i + 1] + 0.114 * px[i + 2]) | 0;
+    px[i] = g; hist[g]++;
+  }
+  const total = px.length / 4;
+  let lo = 0, hi = 255, acc = 0;
+  for (; lo < 255; lo++) { acc += hist[lo]; if (acc > total * 0.02) break; }
+  acc = 0;
+  for (; hi > 0; hi--) { acc += hist[hi]; if (acc > total * 0.02) break; }
+  const range = Math.max(30, hi - lo);
+  for (let i = 0; i < px.length; i += 4) {
+    let v = (px[i] - lo) * 255 / range;
+    v = v < 0 ? 0 : v > 255 ? 255 : v;
+    px[i] = px[i + 1] = px[i + 2] = v;
+  }
+  ctx.putImageData(img, 0, 0);
+}
+
+function quality(canvas) {
+  const w = canvas.width, h = canvas.height;
+  const d = canvas.getContext("2d", { willReadFrequently: true }).getImageData(0, 0, w, h).data;
+  const g = new Float32Array(w * h);
+  let tot = 0;
+  for (let i = 0; i < g.length; i++) {
+    g[i] = 0.299 * d[i * 4] + 0.587 * d[i * 4 + 1] + 0.114 * d[i * 4 + 2];
+    tot += g[i];
+  }
+  let sum = 0, sq = 0, n = 0;
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      const lap = g[i - w] + g[i + w] + g[i - 1] + g[i + 1] - 4 * g[i];
+      sum += lap; sq += lap * lap; n++;
+    }
+  }
+  return { brightness: tot / g.length, sharpness: sq / n - (sum / n) ** 2 };
+}
+
+/* =========================================================
+   8. ENGINE 1: THE SCOUT (fast text-shape detector, every frame)
+   Text is full of short, sharp up-and-down strokes in rows.
+   We count sharp pixel changes in 16x16 squares and look for
+   several text-like squares side by side. No reading happens
+   here, so it costs only a few milliseconds per frame.
+   ========================================================= */
+const TW = 64, TH = 36;                                  // tiny picture used to notice "the product moved"
+const thumbNow = new Uint8Array(TW * TH);
+let gray = null, cells = null, flag = null, cols = 0, rows = 0, fw = 0, fh = 0;
+
+function detectTextShapes() {
+  const W = video.videoWidth, H = video.videoHeight;
+  const s = Math.min(1, FAST_W / W);
+  const w = Math.round(W * s), h = Math.round(H * s);
+  if (w !== fw || h !== fh) {
+    fw = w; fh = h;
+    fastCanvas.width = w; fastCanvas.height = h;
+    gray = new Uint8Array(w * h);
+    cols = Math.ceil(w / CELL); rows = Math.ceil(h / CELL);
+    cells = new Uint16Array(cols * rows);
+    flag = new Uint8Array(cols * rows);
+  }
+  fastCtx.drawImage(video, 0, 0, w, h);
+  const px = fastCtx.getImageData(0, 0, w, h).data;
+  for (let i = 0, p = 0; i < gray.length; i++, p += 4) {
+    gray[i] = (px[p] * 77 + px[p + 1] * 150 + px[p + 2] * 29) >> 8;     // quick grey
+  }
+
+  // Count sharp pixel changes inside each square
+  cells.fill(0);
+  for (let y = 1; y < h - 1; y++) {
+    const row = y * w, crow = (y / CELL | 0) * cols;
+    for (let x = 1; x < w - 1; x++) {
+      const i = row + x;
+      const gx = gray[i + 1] - gray[i - 1];
+      const gy = gray[i + w] - gray[i - w];
+      if ((gx < 0 ? -gx : gx) + (gy < 0 ? -gy : gy) > EDGE_T) cells[crow + (x / CELL | 0)]++;
+    }
+  }
+
+  // A square is "text-like" if it has some edges, but not a flat blank or pure noise
+  const lo = CELL * CELL * 0.07, hi = CELL * CELL * 0.5;
+  for (let k = 0; k < cells.length; k++) flag[k] = (cells[k] >= lo && cells[k] <= hi) ? 1 : 0;
+
+  // Text runs along a line, so keep only squares that have a text-like neighbour left or right
+  let n = 0, minC = cols, maxC = -1, minR = rows, maxR = -1, sumC = 0, sumR = 0;
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const k = r * cols + c;
+      if (!flag[k]) continue;
+      if (!((c > 0 && flag[k - 1]) || (c < cols - 1 && flag[k + 1]))) continue;
+      n++; sumC += c; sumR += r;
+      if (c < minC) minC = c; if (c > maxC) maxC = c;
+      if (r < minR) minR = r; if (r > maxR) maxR = r;
+    }
+  }
+
+  // Tiny grey thumbnail, used to notice that the product moved
+  for (let ty = 0; ty < TH; ty++) {
+    const yy = Math.min(h - 1, Math.floor(ty * h / TH)) * w;
+    for (let tx = 0; tx < TW; tx++) thumbNow[ty * TW + tx] = gray[yy + Math.min(w - 1, Math.floor(tx * w / TW))];
+  }
+
+  const text = n >= MIN_TEXT_CELLS;
+  return {
+    text,
+    box: text ? { x: minC * CELL, y: minR * CELL, w: (maxC - minC + 1) * CELL, h: (maxR - minR + 1) * CELL } : null,
+    cx: text ? ((sumC / n) + 0.5) * CELL / w : 0.5,
+    cy: text ? ((sumR / n) + 0.5) * CELL / h : 0.5
+  };
+}
+
+function meanDiff(a, b) {
+  let s = 0;
+  for (let i = 0; i < a.length; i++) s += Math.abs(a[i] - b[i]);
+  return s / a.length;
+}
+
+/* =========================================================
+   9. ENGINE 2: THE READER (OCR, back to back, no pauses)
+   ========================================================= */
+let workerPromise = null;
+function getWorker() {
+  if (!workerPromise) {
+    workerPromise = Tesseract.createWorker("eng").catch((e) => { workerPromise = null; throw e; });
+  }
+  return workerPromise;
+}
+let curParams = "";
+async function ocr(canvas, psm, whitelist) {
+  const wk = await getWorker();
+  const key = psm + "|" + whitelist;
+  if (key !== curParams) {
+    await wk.setParameters({ tessedit_pageseg_mode: psm, tessedit_char_whitelist: whitelist });
+    curParams = key;
+  }
+  const { data } = await wk.recognize(canvas);
+  return data;
+}
+
+function groupLines(words) {
+  const ws = words
+    .filter((w) => w.text && w.text.trim() && w.confidence > 30)
+    .map((w) => ({ t: w.text.trim(), x0: w.bbox.x0, y0: w.bbox.y0, x1: w.bbox.x1, y1: w.bbox.y1, c: w.confidence }));
+  ws.sort((a, b) => (a.y0 + a.y1) - (b.y0 + b.y1));
+  const lines = [];
+  for (const w of ws) {
+    const cy = (w.y0 + w.y1) / 2, h = w.y1 - w.y0;
+    const line = lines.find((L) => Math.abs(L.cy - cy) < Math.max(L.h, h) * 0.6);
+    if (line) line.words.push(w);
+    else lines.push({ cy, h, words: [w] });
+  }
+  lines.forEach((L) => L.words.sort((a, b) => a.x0 - b.x0));
+  return lines;
+}
+
+// One reading pass. Boxes are in 640-space; the crop later uses the full-size copy.
+async function ocrPass(source, W, H, maxW) {
+  ocrRunning = true;
+  try {
+    if (full.width !== W || full.height !== H) { full.width = W; full.height = H; }
+    fullCtx.drawImage(source, 0, 0, W, H);
+
+    const s = Math.min(1, maxW / W);
+    const w = Math.round(W * s), h = Math.round(H * s);
+    if (ocrCanvas.width !== w || ocrCanvas.height !== h) { ocrCanvas.width = w; ocrCanvas.height = h; }
+    ocrCtx.imageSmoothingQuality = "high";
+    ocrCtx.drawImage(full, 0, 0, w, h);
+
+    const q = quality(ocrCanvas);
+    enhance(ocrCanvas);
+    const data = await ocr(ocrCanvas, "11", "");
+    ocrCount++;
+    $("debug").textContent = "Search read:\n" + ((data.text || "").trim() || "(no text)");
+
+    let best = null, weak = false;
+    for (const L of groupLines(data.words || [])) {
+      let str = "";
+      const spans = [];
+      for (const wd of L.words) {
+        if (str) str += " ";
+        spans.push({ s: str.length, e: str.length + wd.t.length, w: wd });
+        str += wd.t;
+      }
+      for (const hit of findCandidates(str)) {
+        const used = spans.filter((sp) => sp.e > hit.start && sp.s < hit.end).map((sp) => sp.w);
+        if (!used.length) continue;
+        const conf = used.reduce((a, wd) => a + wd.c, 0) / used.length;
+        if (conf < LOCK_CONF) { weak = true; continue; }
+        const x0 = Math.min(...used.map((wd) => wd.x0)), y0 = Math.min(...used.map((wd) => wd.y0));
+        const x1 = Math.max(...used.map((wd) => wd.x1)), y1 = Math.max(...used.map((wd) => wd.y1));
+        const cand = { type: hit.type, value: hit.value, conf, box: { x: x0, y: y0, w: x1 - x0, h: y1 - y0 } };
+        if (!best || cand.conf > best.conf) best = cand;
+      }
+    }
+
+    const hs = (data.words || []).filter((wd) => wd.confidence > 40)
+                 .map((wd) => wd.bbox.y1 - wd.bbox.y0).sort((a, b) => a - b);
+    const medianH = hs.length ? hs[Math.floor(hs.length / 2)] / h : 0;
+
+    return {
+      found: best, W, H, s, w, h,
+      info: { at: Date.now(), brightness: q.brightness, sharpness: q.sharpness, medianH, weak }
+    };
+  } finally {
+    ocrRunning = false;
+  }
+}
+
+/* =========================================================
+   10. DRAWING AND ZOOM
+   ========================================================= */
+function sizeOverlay(w, h) {
+  if (overlay.width !== w || overlay.height !== h) { overlay.width = w; overlay.height = h; }
+}
+function clearBox() { octx.clearRect(0, 0, overlay.width, overlay.height); }
+
+// Blush pink box that follows any text shapes the scout sees
+function drawTrack(info) {
+  sizeOverlay(fw, fh);
+  octx.clearRect(0, 0, fw, fh);
+  if (!info.text) return;
+  octx.lineWidth = 3;
+  octx.strokeStyle = "#f4c2c2";
+  octx.strokeRect(info.box.x, info.box.y, info.box.w, info.box.h);
+}
+
+// Sage green box on the locked number, labelled with the mark that was identified
+function drawBox(b, W, H, labelText) {
+  sizeOverlay(W, H);
+  octx.clearRect(0, 0, W, H);
+  const lw = Math.max(3, W / 150), pad = lw * 2;
+  const x = b.x - pad, y = b.y - pad, w = b.w + pad * 2, h = b.h + pad * 2;
+  octx.fillStyle = "rgba(156,175,136,0.22)";
+  octx.fillRect(x, y, w, h);
+  octx.lineWidth = lw;
+  octx.strokeStyle = "#9caf88";
+  octx.strokeRect(x, y, w, h);
+
+  const size = Math.max(14, W / 32);
+  octx.font = "bold " + size + "px Verdana";
+  const label = labelText;
+  const tw = octx.measureText(label).width + 12;
+  const ly = Math.max(0, y - size - 8);
+  octx.fillStyle = "#9caf88";
+  octx.fillRect(x, ly, tw, size + 8);
+  octx.fillStyle = "#000";
+  octx.fillText(label, x + 6, ly + size);
+}
+
+function showZoom(res) {
+  const s = res.s, b = res.found.box, W = res.W, H = res.H;
+  const bx = b.x / s, by = b.y / s, bw = b.w / s, bh = b.h / s;          // back to full-size coordinates
+  const padX = bw * 0.12, padY = Math.max(bh * 0.2, 6);
+  const sx = Math.max(0, bx - padX), sy = Math.max(0, by - padY);
+  const sw = Math.min(W - sx, bw + padX * 2), sh = Math.min(H - sy, bh + padY * 2);
+
+  const k = Math.max(1, Math.min(4, 1400 / sw));
+  zoomCanvas.width = Math.round(sw * k);
+  zoomCanvas.height = Math.round(sh * k);
+  zctx.drawImage(full, sx, sy, sw, sh, 0, 0, zoomCanvas.width, zoomCanvas.height);
+  enhance(zoomCanvas);
+
+  const st = zoomPanel.style;
+  st.transition = "none";
+  st.left = (bx / W * 100) + "%";
+  st.top = (by / H * 100) + "%";
+  st.width = (bw / W * 100) + "%";
+  st.height = (bh / H * 100) + "%";
+  zoomPanel.classList.add("on");
+  void zoomPanel.offsetWidth;
+  st.transition = "";
+  st.left = "4%"; st.top = "25%"; st.width = "92%"; st.height = "50%";
+}
+function hideZoom() { zoomPanel.classList.remove("on"); }
+
+/* =========================================================
+   11. DECIDE AND SHOW (a different message for each mark)
+   ========================================================= */
+function decide(cands) {
+  // Nothing at all was identified
+  if (!cands.length) {
+    return { style: "bad", cert: null,
+      message: "Warning: No BIS, FSSAI or CRS mark found.",
+      spoken: "Warning: No B I S, F S S A I or C R S mark found.", rows: null };
+  }
+
+  // Look for a number that is in the database AND belongs to the same mark
+  for (const c of cands) {
+    const r = bisDatabase.find((x) => x.cert === c.type && x.number === c.value);
+    if (!r) continue;
+    const cert = CERTS[c.type];
+    const statusLabel = c.type === "CRS" ? "Registration status" : c.type === "FSSAI" ? "Food licence status" : "Licence status";
+    const rows = [["Mark identified", cert.name], ["Product", r.product], ["Company", r.company], [statusLabel, r.status]];
+
+    if (r.status === "Active") {
+      return { style: "good", cert: c.type,
+        message: cert.name + " verified: " + r.product + ".",
+        spoken: cert.say + " mark identified. Verified: " + r.product + ". " + cert.okTail,
+        rows };
+    }
+    const msg = "Warning: The " + cert.name + " " + cert.kind + " for " + r.product + " is " + r.status.toLowerCase() + ".";
+    const spoken = "Warning: The " + cert.say + " " + cert.kind + " for " + r.product + " is " + r.status.toLowerCase() + ".";
+    return { style: "warn", cert: c.type, message: msg, spoken, rows };
+  }
+
+  // A mark was identified but its number is not in the database
+  const c = cands[0], cert = CERTS[c.type];
+  return { style: "bad", cert: c.type,
+    message: "Warning: " + cert.name + " number not found. This " + cert.name + " mark could not be verified.",
+    spoken: "Warning: " + cert.say + " number not found. This " + cert.say + " mark could not be verified.",
+    rows: [["Mark identified", cert.name], ["Number read", c.value]] };
+}
+
+function showOutcome(o) {
+  const box = $("result");
+  box.textContent = o.message;
+  box.className = o.style;
+  setBadge(o.cert);
+  const list = $("details");
+  list.textContent = "";
+  if (!o.rows) { list.style.display = "none"; return; }
+  for (const [label, value] of o.rows) {
+    const dt = document.createElement("dt"); dt.textContent = label;
+    const dd = document.createElement("dd"); dd.textContent = value;
+    list.append(dt, dd);
+  }
+  list.style.display = "block";
+}
+
+function resetUi() {
+  const box = $("result");
+  box.textContent = "Looking for a BIS, FSSAI or CRS mark...";
+  box.className = "";
+  $("details").style.display = "none";
+  setBadge(null);
+  hideZoom();
+  clearBox();
+}
+
+/* =========================================================
+   12. STEP 3: LOCK-IN, VERIFY, SPEAK THE RESULT, THEN GO SILENT
+   ========================================================= */
+async function lockOn(res, myRun, fromPhoto) {
+  state = "verifying";
+  stopSpeech();                                   // cut off any earlier instruction
+  chime();                                        // sharp beep
+  const lockMsg = lockMessages(res.found.type);
+  drawBox(res.found.box, res.w, res.h, CERTS[res.found.type].name + " number");
+  showZoom(res);
+  setBadge(res.found.type);                       // tell the person which mark was found, straight away
+  setGuide(lockMsg.text);
+
+  const talking = (async () => {
+    await sleep(250);                             // voice-side pause only: lets the chime ring out
+    if (myRun === runId) await say(lockMsg.spoken, false);
+  })();
+
+  // Read the sharp full-size crop while the voice speaks
+  let cands = [], zoomText = "";
+  for (const psm of ["7", "6"]) {                 // 7 = one line, 6 = a block (backup)
+    const data = await ocr(zoomCanvas, psm, WHITELIST);
+    zoomText += "[mode " + psm + "] " + (data.text || "").trim() + "\n";
+    cands = findInText(data.text);
+    if (cands.length) break;
+  }
+  await talking;
+  if (myRun !== runId) return;                    // Rescan was pressed, so drop this result
+  $("debug").textContent += "\n\nZoom read:\n" + zoomText;
+
+  // The crop could not confirm the number: not a verdict, so go back to looking
+  if (!cands.length) {
+    const msg = "I could not read the number clearly. Hold the product steady and try again.";
+    if (fromPhoto) {
+      showOutcome({ style: "warn", cert: null, message: msg, rows: null });
+      await say(msg, false);
+      if (myRun === runId) state = "idle";
+      return;
+    }
+    hideZoom(); clearBox(); setBadge(null);
+    state = "scanning";
+    lockBlockedUntil = Date.now() + QUIET_MS;     // do not re-lock for 3 seconds
+    textEpisode = true; step1Done = true; step2Spoken = true;
+    guideSay(msg);
+    return;
+  }
+
+  const outcome = decide(cands);
+  showOutcome(outcome);
+  await say(outcome.spoken, false);               // the final result, spoken once
+  if (myRun !== runId) return;
+
+  if (fromPhoto) { state = "idle"; return; }
+
+  // STEP 4: freeze. Reader stopped, voice silent. Only the scout watches for the product to leave.
+  state = "frozen";
+  thumbBase = null; goneSince = 0; movedSince = 0; armGone = false;
+  setGuide("Result spoken. Move the product away, or press RESCAN.");
+}
+
+/* =========================================================
+   13. STEPS 1 AND 2 AND THE HINTS (decided by the scout, every frame)
+   Hints are about moving the PRODUCT (not the camera).
+   ========================================================= */
+function pickHint(info) {
+  const o = ocrInfo;
+  if (!o || Date.now() - o.at > 2500) return null;          // only trust fresh readings
+  if (o.brightness < DARK_LIMIT)  return "It is too dark. Move the product to a brighter place.";
+  if (o.brightness > GLARE_LIMIT) return "Too much glare. Tilt the product slightly.";
+  if (!textEpisode || !info.text) return null;
+
+  // Text on the left of the picture means the product must move toward the picture's right, and so on.
+  if (info.cx < 0.30) return CAMERA_FACES_USER ? "Move the product slightly to your left."  : "Move the product slightly to your right.";
+  if (info.cx > 0.70) return CAMERA_FACES_USER ? "Move the product slightly to your right." : "Move the product slightly to your left.";
+  if (info.cy < 0.25) return "Move the product slightly down.";
+  if (info.cy > 0.75) return "Move the product slightly up.";
+  if (o.weak || o.medianH < 0.03) return "Bring the label closer to the camera.";
+  if (o.sharpness < BLUR_LIMIT)   return "The picture is blurry. Hold the product steady.";
+  return null;                                              // nothing to fix: stay quiet
+}
+
+function onScanningFrame(info) {
+  if (info.text) { textFrames++; emptyFrames = 0; } else { emptyFrames++; textFrames = 0; }
+  drawTrack(info);
+  const now = Date.now();
+
+  // Step 2: text shapes seen. The first time it is instant and may cut in on Step 1.
+  if (!textEpisode && textFrames >= 3 && (!step2Spoken || (!voiceBusy && now >= quietUntil))) {
+    textEpisode = true; step1Done = true; step2Spoken = true;
+    guideSay(MSG_TEXT);                                     // starts the 3 quiet seconds when it ends
+  }
+  // Step 1: nothing but empty picture. Spoken once.
+  else if (!step1Done && !textEpisode && emptyFrames >= 6) {
+    step1Done = true;
+    guideSay(MSG_SEARCH);
+  }
+
+  if (textEpisode && emptyFrames >= 15) textEpisode = false;   // text really left, allow a fresh "Text found" later
+
+  // Directional hints: at most one every 3 quiet seconds
+  if (step1Done && canHint()) {
+    const h = pickHint(info);
+    if (h) { setGuide(h); say(h, true); }
+  }
+}
+
+// While frozen: stay silent, and only watch for the product leaving
+function onFrozenFrame(info) {
+  const now = Date.now();
+  if (!thumbBase) {                                         // first frozen frame: remember how things look
+    thumbBase = thumbNow.slice();
+    armGone = info.text;                                    // "text gone" only counts if the scout saw text to begin with
+    return;
+  }
+  if (info.text) goneSince = 0; else if (!goneSince) goneSince = now;
+  const gone = armGone && goneSince && now - goneSince >= REMOVE_MS;
+
+  if (meanDiff(thumbNow, thumbBase) > MOVE_DIFF) { if (!movedSince) movedSince = now; } else movedSince = 0;
+  const moved = movedSince && now - movedSince >= MOVE_HOLD_MS;
+
+  if (gone || moved) rearm();
+}
+
+function rearm() {
+  resetSession();
+  hideZoom(); clearBox(); setBadge(null);
+  state = "scanning";
+  setGuide("Ready for the next product.");
+}
+
+function resetSession() {
+  textFrames = 0; emptyFrames = 0;
+  textEpisode = false; step1Done = false; step2Spoken = false;
+  quietUntil = 0; lockBlockedUntil = 0; ocrInfo = null;
+}
+
+/* =========================================================
+   14. THE TWO LOOPS
+   ========================================================= */
+// Scout loop: every camera frame, no skipping, no waiting
+function fastTick() {
+  if (video.videoWidth && (state === "scanning" || state === "frozen")) {
+    const info = detectTextShapes();
+    fastCount++;
+    if (state === "scanning") onScanningFrame(info);
+    else onFrozenFrame(info);
+  }
+  schedule();
+}
+function schedule() {
+  if (video.requestVideoFrameCallback) video.requestVideoFrameCallback(fastTick);
+  else requestAnimationFrame(fastTick);
+}
+
+// Reader loop: one pass right after another, no sleeping between passes
+async function ocrLoop() {
+  for (;;) {
+    if (state !== "scanning" || !video.videoWidth || Date.now() < lockBlockedUntil) {
+      await nextFrame();                                    // idle only: nothing to read right now
+      continue;
+    }
+    const myRun = runId;
+    try {
+      const res = await ocrPass(video, video.videoWidth, video.videoHeight, FAST_W);
+      if (myRun !== runId || state !== "scanning") continue;
+      ocrInfo = res.info;
+      if (res.found) await lockOn(res, myRun, false);       // valid pattern: lock at once
+    } catch (err) {
+      console.error(err);
+      setGuide("Something went wrong. Press RESCAN to try again.");
+      await sleep(500);                                     // only after an error, so a failure cannot spin the CPU
+    }
+  }
+}
+
+/* =========================================================
+   15. CAMERA AND BUTTONS
+   ========================================================= */
+async function startCamera() {
+  try {
+    video.srcObject = await navigator.mediaDevices.getUserMedia({
+      video: { facingMode: "environment", width: { ideal: 1920 }, height: { ideal: 1080 } }
+    });
+  } catch (err) {
+    cameraFailed = true;
+    setGuide("The camera is not available. You can choose a photo instead.");
+  }
+}
+
+function startScanning() {
+  if (cameraFailed) { setGuide("The camera is not available. Choose a photo instead."); return; }
+  runId++;                                                  // cancels any older work
+  stopSpeech();
+  resetSession();
+  resetUi();
+  state = "scanning";
+  mainBtn.textContent = "RESCAN";
+  setGuide("Scanning...");
+}
+
+mainBtn.addEventListener("click", () => {
+  unlockSpeech();
+  ensureAudio();
+  startScanning();                                          // START and RESCAN do the same thing
+});
+
+$("fileInput").addEventListener("change", async (e) => {
+  const file = e.target.files[0];
+  if (!file) return;
+  unlockSpeech();
+  ensureAudio();
+  const myRun = ++runId;
+  stopSpeech();
+  resetSession();
+  resetUi();
+  state = "verifying";
+  mainBtn.textContent = "START SCANNING";
+  try {
+    setGuide("Reading the photo. Please wait.");
+    while (ocrRunning) await sleep(50);                     // let any camera read finish first
+    const bmp = await createImageBitmap(file);
+    const res = await ocrPass(bmp, bmp.width, bmp.height, 1100);
+    if (myRun !== runId) return;
+    if (res.found) {
+      await lockOn(res, myRun, true);
+    } else {
+      const o = decide([]);
+      showOutcome(o);
+      await say(o.spoken, false);
+      if (myRun === runId) state = "idle";
+    }
+  } catch (err) {
+    console.error(err);
+    setGuide("Something went wrong. Please try again.");
+    state = "idle";
+  } finally {
+    e.target.value = "";
+  }
+});
+
+// Live speed readout (testing only)
+setInterval(() => {
+  $("stats").textContent = "Scout: " + fastCount + " frames/sec   Reader: " + ocrCount + " passes/sec";
+  fastCount = 0; ocrCount = 0;
+}, 1000);
+
+video.addEventListener("playing", () => { schedule(); ocrLoop(); }, { once: true });
+getWorker().catch(() => {});                                // load the reader in the background
+startCamera();
+</script>
+</body>
+</html>
